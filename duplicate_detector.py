@@ -6,22 +6,22 @@ import codecs
 import string
 import unicodedata
 import hashlib
-from itertools import repeat, izip
+from itertools import repeat, izip, combinations
 from operator import add
 from os import linesep
 from multiprocessing import Pool
 
-num_chunks = 4
+num_chunks = 16
 
 class DocumentSimHasher:
-  def __init__(self, retrieved_document, num_chunks):
+  def __init__(self, doc, num_chunks):
     self.num_chunks = num_chunks
-    self.fingerprints = ((1 if bit == '1' else -1 for bit in f_print) for f_print in retrieved_document.fingerprints)
+    self.fingerprints = ((1 if bit == '1' else -1 for bit in f_print) for f_print in doc.fingerprints)
 
   def fingerprint_sum(self):
     result = ''.join(('1' if bit > 0 else '0' for bit in (sum (e) for e in izip(*self.fingerprints))))
     # Return fingerprint sum in parts
-    chunk_size = 224 / self.num_chunks
+    chunk_size = 512 / self.num_chunks
     return [result[i:i+chunk_size] for i in range(0, len(result), chunk_size)]
 
 class DocumentRetrieval:
@@ -31,17 +31,20 @@ class DocumentRetrieval:
     contents = contents.strip()
 
     # Unicode normalisation *magic*
-    _category = unicodedata.category
-    normalised = unicodedata.normalize('NFD', contents).lower()
+    normalised = unicodedata.normalize('NFKD', contents).lower()
 
     # Remove 'Punctuation', 'Mark', 'Separator' and 'Other' unicode categories, and 'Math symbols' (<==>
-    self.tokens = [token for token in normalised if not(_category(token)[0] in ['P', 'M', 'Z', 'C'] or _category(token) in ['Sm'])]
+    def should_drop(token):
+      _category = unicodedata.category
+      return _category(token)[0] in ['P', 'M', 'Z', 'C'] or _category(token) in ['Sm']
+
+    self.tokens = [token for token in normalised if not should_drop(token)]
     print_cache = {}
     def fingerprint(token):
       try:
         return print_cache[token]
       except KeyError:
-        print_cache[token] = bin(int(hashlib.sha224(str(ord(token))).hexdigest(), 16))[2:].zfill(224)
+        print_cache[token] = bin(int(hashlib.sha512(str(ord(token))).hexdigest(), 16))[2:].zfill(512)
         return print_cache[token]
 
     self.fingerprints = [fingerprint(token) for token in self.tokens]
@@ -76,8 +79,8 @@ class SimHashDupeDetector:
     for i in xrange(num_chunks):
       for c, bucket in buckets[i].iteritems():
         if len(bucket) > 1:
-          self.dupes.update(izip(repeat(bucket[0]), bucket[1:]))
-
+          self.dupes.update(combinations(bucket, 2))
+          #self.dupes.update(izip(repeat(bucket[0]), bucket[1:]))
 
 class ExactDupeDetector:
   def __init__(self, read_documents):
@@ -90,19 +93,48 @@ class ExactDupeDetector:
 
     for c, bucket in seen.iteritems():
       if len(bucket) > 1:
-        self.dupes.update(izip(repeat(bucket[0]), bucket[1:]))
+        self.dupes.update(combinations(bucket, 2))
 
 class TuplePrinter:
   def __init__(self, filename, tuple_set):
-    with open(filename, 'w') as output:
-      output.write(linesep.join(' '.join([a,b]) for (a, b) in tuple_set) + linesep)
+    self.filename = filename
+    self.tuple_set = tuple_set
 
+  def dump(self):
+    with open(self.filename, 'w') as output:
+      output.write(linesep.join(' '.join([a,b]) for (a, b) in self.tuple_set) + linesep)
+
+class TruthReader:
+  def __init__(self, truth_files):
+    self.dupes = set([])
+
+    for truth_file in truth_files:
+      with open(truth_file) as truth:
+        self.dupes.update(tuple(line.strip().split(' ')) for line in truth.readlines())
 
 def main():
+  truth_files = [
+    '/afs/inf.ed.ac.uk/user/s11/s1157979/Public/truth/t1.dup',
+    '/afs/inf.ed.ac.uk/user/s11/s1157979/Public/truth/t2.dup',
+    '/afs/inf.ed.ac.uk/user/s11/s1157979/Public/truth/t3.dup'
+  ]
+  truth = TruthReader(truth_files).dupes
   index = IndexRetrieval('./files.index').index
   dupes = ExactDupeDetector(index).dupes | SimHashDupeDetector(index, num_chunks).dupes
-  TuplePrinter('./dupes', dupes)
+  TuplePrinter('./dupes', dupes).dump()
 
+  real_dupes = len(truth)
+  reported_dupes = len(dupes)
+  true_positives = len(truth & dupes)
+  false_positives = len(dupes - truth)
+  false_negatives = len(truth - dupes)
+  print "True_P:" + str(true_positives) + " False_P: " + str(false_positives) + " False_N: " + str(false_negatives)
+
+  recall = true_positives / float(real_dupes)
+  precision = true_positives / float(true_positives + false_positives)
+  f_1 = (2 * recall * precision) / (recall + precision)
+
+  print str(num_chunks)+ " Chunks => Precision: " + str(precision) + " Recall: " + str(recall) + " F1: " + str(f_1)
 
 if __name__ == '__main__':
   main()
