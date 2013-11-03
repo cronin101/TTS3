@@ -19,13 +19,7 @@ class CosineFilter:
 
     overlap_scores = [(t, score(t)) for t in dupes]
     mean_score = sum(score for (t, score) in overlap_scores) / float(len(overlap_scores))
-    standard_dev = (sum(((score - mean_score) ** 2) for (t, score) in overlap_scores) / float(len(overlap_scores))) ** 0.5
-    print mean_score
-    print overlap_scores
-    #cutoff = float(mean_score + 4.0) / 5.0
-    cutoff = 0.9992
-    print cutoff
-    self.dupes = set(t for (t, score) in overlap_scores if score >= cutoff)
+    self.dupes = set(t for (t, score) in overlap_scores if score > mean_score)
 
 def main():
   phase_one_dupes = DupeReader(['./dupes']).dupes

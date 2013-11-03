@@ -55,18 +55,20 @@ class DocumentRetrieval:
       return _category(token)[0] in ['P', 'M', 'Z', 'C', 'S'] #or _category(token) in ['Sm'] or token in chinese_stopwords
 
     self.tokens = [token for token in normalised if not should_drop(token)]
+    self.contents = u''.join(self.tokens)
+    # Generate bigrams for tokens
+    self.tokens = map(lambda (a, b): ''.join([a,b]), zip(self.tokens, self.tokens[1:]))
     words.extend(self.tokens)
     print_cache = {}
     def fingerprint(token):
       try:
         return print_cache[token]
       except KeyError:
-        print_cache[token] = bin(int(hashlib.sha512(str(ord(token))).hexdigest(), 16))[2:].zfill(hash_length)
+        print_cache[token] = bin(int(hashlib.sha512(token.encode('utf-8')).hexdigest(), 16))[2:].zfill(hash_length)
         return print_cache[token]
 
     self.fingerprints = [fingerprint(token) for token in self.tokens]
 
-    self.contents = u''.join(self.tokens)
     self.filename = document_path.split('/')[-1]
 
 class IndexRetrieval:
