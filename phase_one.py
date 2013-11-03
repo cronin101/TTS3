@@ -19,7 +19,7 @@ if len(sys.argv) > 2:
   chunks_needed = int(sys.argv[2])
 else:
   num_chunks = 64
-  chunks_needed = 57
+  chunks_needed = 47
 
 hash_length = 512
 
@@ -39,8 +39,6 @@ class DocumentSimHasher:
 
 class DocumentRetrieval:
   def __init__(self, document_path):
-    #chinese_stopwords = set(list(u"的一不"))
-    #chinese_stopwords = set(list(u"的一不在有是为以于上他而"))
 
     with codecs.open(document_path, encoding='utf-8') as document:
       contents = document.read()
@@ -52,12 +50,13 @@ class DocumentRetrieval:
     # Remove 'Punctuation', 'Mark', 'Separator' and 'Other' unicode categories, and 'Math symbols' (<==>
     def should_drop(token):
       _category = unicodedata.category
-      return _category(token)[0] in ['P', 'M', 'Z', 'C', 'S'] #or _category(token) in ['Sm'] or token in chinese_stopwords
+      return _category(token)[0] in ['P', 'M', 'Z', 'C', 'S']
 
     self.tokens = [token for token in normalised if not should_drop(token)]
     self.contents = u''.join(self.tokens)
     # Generate bigrams for tokens
-    self.tokens = map(lambda (a, b): ''.join([a,b]), zip(self.tokens, self.tokens[1:]))
+    bigrams = map(lambda (a, b): ''.join([a,b]), zip(self.tokens, self.tokens[1:]))
+    self.tokens = bigrams
     words.extend(self.tokens)
     print_cache = {}
     def fingerprint(token):
@@ -69,7 +68,8 @@ class DocumentRetrieval:
 
     self.fingerprints = [fingerprint(token) for token in self.tokens]
 
-    self.filename = document_path.split('/')[-1]
+    self.fullpath = document_path
+    self.filename = self.fullpath.split('/')[-1]
 
 class IndexRetrieval:
   def __init__(self, index_path):
@@ -102,14 +102,14 @@ class SimHashDupeDetector:
           dupe_count.update(map(normalise_tuple, combinations(bucket, 2)))
 
     self.dupedocs.update(t for (t, c) in dupe_count.iteritems() if c >= chunks_needed)
-    self.dupes = set((a.filename, b.filename) for (a, b) in self.dupedocs)
+    self.dupes = set((a.fullpath, b.fullpath) for (a, b) in self.dupedocs)
 
 class ExactDupeDetector:
   def __init__(self, read_documents):
     self.dupes = set([])
     seen = {}
     for document in read_documents:
-      name = document.filename
+      name = document.fullpath
       contents = document.contents
       seen[contents] = seen.get(contents, []) + [name]
 
@@ -120,7 +120,7 @@ class ExactDupeDetector:
 def main():
   index = IndexRetrieval('./files.index').index
   dupes = ExactDupeDetector(index).dupes | SimHashDupeDetector(index, num_chunks).dupes
-  TuplePrinter('./dupes', dupes).dump()
+  TuplePrinter('./phase_one_out', dupes).dump()
 
 if __name__ == '__main__':
   main()
